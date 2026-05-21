@@ -15,7 +15,7 @@
   <header class="app-header">
     <div class="header-left">
       <div class="logo">
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
           <circle cx="12" cy="12" r="10"/>
           <path d="M12 8v4M12 16h.01"/>
         </svg>
@@ -44,7 +44,7 @@
 
     <div class="scan-controls">
       <button class="btn btn-primary" id="scanBtn">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true">
           <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>
         </svg>
         Scan Page
@@ -53,19 +53,19 @@
     </div>
 
     <!-- Axe Summary Bar -->
-    <div class="axe-summary hidden" id="axeSummary">
-      <div class="axe-stat critical" id="axeViolations">
+    <div class="axe-summary hidden" id="axeSummary" role="group" aria-label="axe-core results — click to filter">
+      <button class="axe-stat critical" id="axeViolations" aria-pressed="false">
         <span class="stat-num">0</span>
         <span class="stat-label">violations</span>
-      </div>
-      <div class="axe-stat warn" id="axeIncomplete">
+      </button>
+      <button class="axe-stat warn" id="axeIncomplete" aria-pressed="false">
         <span class="stat-num">0</span>
         <span class="stat-label">incomplete</span>
-      </div>
-      <div class="axe-stat pass" id="axePasses">
+      </button>
+      <button class="axe-stat pass" id="axePasses" aria-pressed="false">
         <span class="stat-num">0</span>
         <span class="stat-label">passes</span>
-      </div>
+      </button>
     </div>
 
     <!-- Filter bar -->
@@ -82,7 +82,7 @@
     <!-- Component list -->
     <div class="component-list" id="componentList" aria-label="Detected components">
       <div class="empty-state" id="emptyState">
-        <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" opacity="0.3">
+        <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" opacity="0.3" aria-hidden="true">
           <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>
         </svg>
         <p>Run a scan to detect components</p>
@@ -106,7 +106,7 @@
 
     <div class="findings-list" id="findingsList" aria-label="Logged findings">
       <div class="empty-state">
-        <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" opacity="0.3">
+        <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" opacity="0.3" aria-hidden="true">
           <path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>
         </svg>
         <p>No findings logged yet</p>
@@ -122,8 +122,8 @@
       <p class="muted" id="exportCount">0 findings logged</p>
 
       <div class="export-options">
-        <div class="export-card" id="exportCSV">
-          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+        <button class="export-card" id="exportCSV">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
             <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
             <polyline points="14 2 14 8 20 8"/>
             <line x1="8" y1="13" x2="16" y2="13"/><line x1="8" y1="17" x2="16" y2="17"/>
@@ -133,13 +133,13 @@
             <div class="export-title">Export CSV</div>
             <div class="export-desc">Spreadsheet-friendly format</div>
           </div>
-          <svg class="export-arrow" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <svg class="export-arrow" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
             <path d="M12 5v14M5 12l7 7 7-7"/>
           </svg>
-        </div>
+        </button>
 
-        <div class="export-card" id="exportJSON">
-          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+        <button class="export-card" id="exportJSON">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
             <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
             <polyline points="14 2 14 8 20 8"/>
             <path d="M8 13s1-1 2 0 2 0 2 0M8 17s1-1 2 0 2 0 2 0"/>
@@ -148,10 +148,10 @@
             <div class="export-title">Export JSON</div>
             <div class="export-desc">Structured data format</div>
           </div>
-          <svg class="export-arrow" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <svg class="export-arrow" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
             <path d="M12 5v14M5 12l7 7 7-7"/>
           </svg>
-        </div>
+        </button>
       </div>
 
       <div class="export-meta">
@@ -191,10 +191,10 @@
         <p class="field-hint">Stored locally in Chrome storage. Never sent anywhere except the Anthropic API.</p>
       </div>
       <div class="field">
-        <label class="field-label">Auto-scan on open</label>
+        <label class="field-label" for="autoScanToggle">Auto-scan on open</label>
         <label class="toggle">
           <input type="checkbox" id="autoScanToggle" />
-          <span class="toggle-track"><span class="toggle-thumb"></span></span>
+          <span class="toggle-track" aria-hidden="true"><span class="toggle-thumb"></span></span>
         </label>
       </div>
       <button class="btn btn-primary" id="saveSettingsBtn">Save Settings</button>

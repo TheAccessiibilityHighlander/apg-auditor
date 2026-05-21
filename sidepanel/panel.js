@@ -124,6 +124,42 @@ function setupTabs() {
   });
 }
 
+// ── Focus trap utility ────────────────────────────────────────────────────────
+
+function openDialog(overlay, triggerEl) {
+  overlay.classList.remove('hidden');
+  const focusable = getFocusable(overlay);
+  if (focusable.length) focusable[0].focus();
+  overlay._trigger = triggerEl;
+
+  function onKeydown(e) {
+    if (e.key === 'Escape') { closeDialog(overlay); return; }
+    if (e.key !== 'Tab') return;
+    const focusable = getFocusable(overlay);
+    if (!focusable.length) return;
+    const first = focusable[0], last = focusable[focusable.length - 1];
+    if (e.shiftKey) {
+      if (document.activeElement === first) { e.preventDefault(); last.focus(); }
+    } else {
+      if (document.activeElement === last) { e.preventDefault(); first.focus(); }
+    }
+  }
+  overlay._keydownHandler = onKeydown;
+  overlay.addEventListener('keydown', onKeydown);
+}
+
+function closeDialog(overlay) {
+  overlay.classList.add('hidden');
+  overlay.removeEventListener('keydown', overlay._keydownHandler);
+  overlay._trigger?.focus();
+}
+
+function getFocusable(el) {
+  return Array.from(el.querySelectorAll(
+    'a[href], button:not([disabled]), input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+  ));
+}
+
 // ── Settings ─────────────────────────────────────────────────────────────────
 
 function setupSettings() {
@@ -134,8 +170,8 @@ function setupSettings() {
   const toggleBtn = document.getElementById('toggleApiKey');
   const input = document.getElementById('apiKeyInput');
 
-  btn.addEventListener('click', () => overlay.classList.remove('hidden'));
-  closeBtn.addEventListener('click', () => overlay.classList.add('hidden'));
+  btn.addEventListener('click', () => openDialog(overlay, btn));
+  closeBtn.addEventListener('click', () => closeDialog(overlay));
 
   toggleBtn.addEventListener('click', () => {
     if (input.type === 'password') {
@@ -191,7 +227,6 @@ function setupScan() {
 
   ['axeViolations', 'axeIncomplete', 'axePasses'].forEach(id => {
     const el = document.getElementById(id);
-    el.style.cursor = 'pointer';
     el.addEventListener('click', () => {
       const key = id === 'axeViolations' ? 'violations' : id === 'axeIncomplete' ? 'incomplete' : 'passes';
       state.axeFilter = state.axeFilter === key ? null : key;
@@ -202,9 +237,13 @@ function setupScan() {
 }
 
 function updateAxeStatActiveState() {
-  document.getElementById('axeViolations').classList.toggle('active', state.axeFilter === 'violations');
-  document.getElementById('axeIncomplete').classList.toggle('active', state.axeFilter === 'incomplete');
-  document.getElementById('axePasses').classList.toggle('active', state.axeFilter === 'passes');
+  const map = { axeViolations: 'violations', axeIncomplete: 'incomplete', axePasses: 'passes' };
+  Object.entries(map).forEach(([id, key]) => {
+    const el = document.getElementById(id);
+    const active = state.axeFilter === key;
+    el.classList.toggle('active', active);
+    el.setAttribute('aria-pressed', active ? 'true' : 'false');
+  });
 }
 
 async function startScan() {
@@ -341,12 +380,15 @@ function buildComponentItem(comp) {
   // Wire up buttons inside detail
   item.querySelector('.btn-apg')?.addEventListener('click', (e) => {
     e.stopPropagation();
-    openApgOverlay(comp);
+    openApgOverlay(comp, e.currentTarget);
   });
 
   item.querySelector('.btn-log')?.addEventListener('click', (e) => {
     e.stopPropagation();
-    openFindingForm({ element: comp.componentType + (comp.accessibleName ? ` — "${comp.accessibleName}"` : '') });
+    openFindingForm(
+      { element: comp.componentType + (comp.accessibleName ? ` — "${comp.accessibleName}"` : '') },
+      e.currentTarget
+    );
   });
 
   return item;
@@ -398,12 +440,12 @@ function toggleComponent(item, header) {
 
 // ── APG Overlay ───────────────────────────────────────────────────────────────
 
-async function openApgOverlay(comp) {
+async function openApgOverlay(comp, triggerEl) {
   const overlay = document.getElementById('apgOverlay');
   const body = document.getElementById('apgBody');
 
-  overlay.classList.remove('hidden');
   body.innerHTML = '<div class="spinner" aria-label="Loading APG data…"></div>';
+  openDialog(overlay, triggerEl);
 
   if (!state.settings.apiKey) {
     body.innerHTML = `<div style="color:var(--yellow);font-size:13px">⚠ No API key configured. Open Settings to add your Claude API key.</div>`;
@@ -431,7 +473,7 @@ async function openApgOverlay(comp) {
     if (idx !== -1) state.components[idx].apgData = res.result;
   });
 
-  document.getElementById('closeApgBtn').onclick = () => overlay.classList.add('hidden');
+  document.getElementById('closeApgBtn').onclick = () => closeDialog(overlay);
 }
 
 function buildApgHTML(data) {
@@ -485,6 +527,9 @@ function setupFindingForm() {
   document.getElementById('addFindingBtn').addEventListener('click', () => openFindingForm());
   document.getElementById('closeFindingBtn').addEventListener('click', closeFindingForm);
   document.getElementById('cancelFindingBtn').addEventListener('click', closeFindingForm);
+  document.getElementById('findingOverlay').addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') closeFindingForm();
+  });
   document.getElementById('saveFindingBtn').addEventListener('click', saveFinding);
   document.getElementById('findingFilter').addEventListener('input', renderFindings);
 
@@ -492,16 +537,45 @@ function setupFindingForm() {
   const input = document.getElementById('findingWcag');
   const dropdown = document.getElementById('wcagDropdown');
 
+  input.setAttribute('role', 'combobox');
+  input.setAttribute('aria-autocomplete', 'list');
+  input.setAttribute('aria-expanded', 'false');
+  input.setAttribute('aria-controls', 'wcagDropdown');
+
   input.addEventListener('focus', () => showWcagDropdown(input.value));
   input.addEventListener('input', () => showWcagDropdown(input.value));
+
+  input.addEventListener('keydown', (e) => {
+    const opts = [...dropdown.querySelectorAll('.wcag-option')];
+    const cur = dropdown.querySelector('[aria-selected="true"]');
+    const idx = opts.indexOf(cur);
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      const next = opts[idx + 1] || opts[0];
+      setWcagActive(opts, next);
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      const prev = opts[idx - 1] || opts[opts.length - 1];
+      setWcagActive(opts, prev);
+    } else if (e.key === 'Enter' && cur) {
+      e.preventDefault();
+      cur.click();
+    } else if (e.key === 'Escape') {
+      dropdown.classList.add('hidden');
+      input.setAttribute('aria-expanded', 'false');
+    }
+  });
+
   document.addEventListener('click', (e) => {
-    if (!e.target.closest('.select-search-wrap')) dropdown.classList.add('hidden');
+    if (!e.target.closest('.select-search-wrap')) {
+      dropdown.classList.add('hidden');
+      input.setAttribute('aria-expanded', 'false');
+    }
   });
 }
 
-function openFindingForm(prefill = {}) {
+function openFindingForm(prefill = {}, triggerEl = null) {
   const overlay = document.getElementById('findingOverlay');
-  overlay.classList.remove('hidden');
   document.getElementById('findingId').value = prefill.id || '';
   document.getElementById('findingElement').value = prefill.element || '';
   document.getElementById('findingWcag').value = prefill.wcag || '';
@@ -511,11 +585,11 @@ function openFindingForm(prefill = {}) {
   document.getElementById('findingStatus').value = prefill.status || 'fail';
   document.getElementById('findingFrequency').value = prefill.frequency || 1;
   document.getElementById('findingNotes').value = prefill.notes || '';
-  document.getElementById('findingElement').focus();
+  openDialog(overlay, triggerEl || document.getElementById('addFindingBtn'));
 }
 
 function closeFindingForm() {
-  document.getElementById('findingOverlay').classList.add('hidden');
+  closeDialog(document.getElementById('findingOverlay'));
 }
 
 function saveFinding() {
@@ -558,6 +632,7 @@ function deleteFinding(id) {
 // ── WCAG Dropdown ─────────────────────────────────────────────────────────────
 
 function showWcagDropdown(query) {
+  const input = document.getElementById('findingWcag');
   const dropdown = document.getElementById('wcagDropdown');
   const q = query.toLowerCase();
 
@@ -567,25 +642,42 @@ function showWcagDropdown(query) {
       )
     : WCAG_CRITERIA;
 
-  if (matches.length === 0) { dropdown.classList.add('hidden'); return; }
+  if (matches.length === 0) {
+    dropdown.classList.add('hidden');
+    input.setAttribute('aria-expanded', 'false');
+    return;
+  }
 
   dropdown.innerHTML = matches.slice(0, 20).map(c => `
-    <div class="wcag-option" role="option" data-code="${c.code}" data-name="${esc(c.name)}" data-level="${c.level}">
+    <div class="wcag-option" role="option" aria-selected="false" data-code="${c.code}" data-name="${esc(c.name)}" data-level="${c.level}">
       <span class="wcag-option-code">${c.code}</span>
       <span class="wcag-option-name">${esc(c.name)}</span>
       <span style="color:var(--text3);margin-left:4px;font-size:10px">${c.level}</span>
     </div>`).join('');
 
   dropdown.classList.remove('hidden');
+  input.setAttribute('aria-expanded', 'true');
 
   dropdown.querySelectorAll('.wcag-option').forEach(opt => {
-    opt.addEventListener('click', () => {
-      document.getElementById('findingWcag').value = `${opt.dataset.code} — ${opt.dataset.name}`;
-      document.getElementById('findingWcagCode').value = opt.dataset.code;
-      document.getElementById('findingLevel').value = opt.dataset.level;
-      dropdown.classList.add('hidden');
-    });
+    opt.addEventListener('click', () => selectWcagOption(opt));
   });
+}
+
+function setWcagActive(opts, target) {
+  opts.forEach(o => o.setAttribute('aria-selected', 'false'));
+  target.setAttribute('aria-selected', 'true');
+  target.scrollIntoView({ block: 'nearest' });
+  document.getElementById('findingWcag').setAttribute('aria-activedescendant', target.id || '');
+}
+
+function selectWcagOption(opt) {
+  const input = document.getElementById('findingWcag');
+  const dropdown = document.getElementById('wcagDropdown');
+  input.value = `${opt.dataset.code} — ${opt.dataset.name}`;
+  document.getElementById('findingWcagCode').value = opt.dataset.code;
+  document.getElementById('findingLevel').value = opt.dataset.level;
+  dropdown.classList.add('hidden');
+  input.setAttribute('aria-expanded', 'false');
 }
 
 // ── Findings Rendering ───────────────────────────────────────────────────────

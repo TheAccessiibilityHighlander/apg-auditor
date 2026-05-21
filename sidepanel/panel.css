@@ -161,6 +161,12 @@ body {
   align-items: center;
   padding: 8px 4px;
   border-right: 1px solid var(--border);
+  background: none;
+  border-top: none;
+  border-bottom: none;
+  border-left: none;
+  cursor: pointer;
+  font-family: var(--font);
 }
 
 .axe-stat:last-child { border-right: none; }
@@ -492,6 +498,9 @@ body {
   border-radius: var(--radius-lg);
   cursor: pointer;
   transition: border-color var(--transition), background var(--transition);
+  font-family: var(--font);
+  text-align: left;
+  width: 100%;
 }
 
 .export-card:hover {
