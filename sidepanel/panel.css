@@ -341,15 +341,62 @@ body {
 .violation-list { margin-top: 4px; }
 
 .violation-item {
-  display: flex;
-  gap: 8px;
-  align-items: flex-start;
-  padding: 5px 0;
+  padding: 7px 0;
   border-bottom: 1px solid var(--border);
   font-size: 11px;
 }
 
 .violation-item:last-child { border-bottom: none; }
+
+.violation-item-inner { display: flex; flex-direction: column; gap: 4px; }
+
+.violation-top {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.violation-rule {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text2);
+}
+
+.violation-link {
+  font-size: 10px;
+  color: var(--accent);
+  text-decoration: none;
+  margin-left: auto;
+}
+
+.violation-link:hover { text-decoration: underline; }
+
+.violation-help {
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.violation-summary {
+  color: var(--yellow);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.violation-html {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 5px 7px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text2);
+  overflow-x: auto;
+  white-space: pre;
+  margin: 0;
+  max-height: 80px;
+}
 
 .impact-badge {
   border-radius: 3px;

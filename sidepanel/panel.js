@@ -397,15 +397,22 @@ function buildComponentItem(comp) {
 function buildDetailHTML(comp) {
   const ariaEntries = Object.entries(comp.ariaAttrs || {});
 
+  const renderViolations = (list) => list.map(v => `
+    <div class="violation-item">
+      <div class="violation-item-inner">
+        <div class="violation-top">
+          <span class="impact-badge impact-${v.impact}">${esc(v.impact)}</span>
+          <span class="violation-rule">${esc(v.id)}</span>
+          ${v.helpUrl ? `<a class="violation-link" href="${esc(v.helpUrl)}" target="_blank" rel="noopener" aria-label="axe docs for ${esc(v.id)}">docs ↗</a>` : ''}
+        </div>
+        <div class="violation-help">${esc(v.help)}</div>
+        ${v.failureSummary ? `<div class="violation-summary">${esc(v.failureSummary.replace(/^Fix (any|all|one) of the following:\n?/i, '').trim())}</div>` : ''}
+        ${v.html ? `<pre class="violation-html">${esc(v.html)}</pre>` : ''}
+      </div>
+    </div>`).join('');
+
   const violationsHTML = comp.axeViolations?.length > 0
-    ? comp.axeViolations.map(v => `
-        <div class="violation-item">
-          <span class="impact-badge impact-${v.impact}">${v.impact}</span>
-          <div>
-            <div>${esc(v.help)}</div>
-            <div style="color:var(--text2);font-size:10px;margin-top:2px">${esc(v.id)}</div>
-          </div>
-        </div>`).join('')
+    ? renderViolations(comp.axeViolations)
     : '<div style="color:var(--text2);font-size:12px">No axe violations detected</div>';
 
   return `
@@ -423,9 +430,14 @@ function buildDetailHTML(comp) {
       </div>
     </div>` : ''}
     <div class="detail-section">
-      <div class="detail-title">axe-core Results</div>
+      <div class="detail-title">axe-core Violations</div>
       <div class="violation-list">${violationsHTML}</div>
     </div>
+    ${comp.axeIncomplete?.length ? `
+    <div class="detail-section">
+      <div class="detail-title">Needs Review</div>
+      <div class="violation-list">${renderViolations(comp.axeIncomplete)}</div>
+    </div>` : ''}
     <div class="detail-actions">
       <button class="btn btn-ghost btn-sm btn-apg">APG Pattern ↗</button>
       <button class="btn btn-ghost btn-sm btn-log">Log Finding</button>

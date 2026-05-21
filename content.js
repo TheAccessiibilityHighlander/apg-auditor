@@ -311,6 +311,10 @@ function buildAxeMap(rules) {
             help: rule.help,
             helpUrl: rule.helpUrl,
             tags: rule.tags,
+            // Node-level detail
+            html: node.html,
+            failureSummary: node.failureSummary,
+            target: node.target,
           });
           map.set(el, existing);
         } catch { /* invalid selector — skip */ }

@@ -53,6 +53,55 @@ async function handleScanPage(tabId, sendResponse) {
   }
 }
 
+// ── APG pattern slug → validated URL ────────────────────────────────────────
+// All slugs verified against https://www.w3.org/WAI/ARIA/apg/patterns/
+
+const APG_PATTERNS = {
+  'accordion':         'accordion',
+  'alert':             'alert',
+  'alert-dialog':      'alertdialog',
+  'breadcrumb':        'breadcrumb',
+  'button':            'button',
+  'carousel':          'carousel',
+  'checkbox':          'checkbox',
+  'combobox':          'combobox',
+  'dialog':            'dialog-modal',
+  'disclosure':        'disclosure',
+  'feed':              'feed',
+  'grid':              'grid',
+  'link':              'link',
+  'listbox':           'listbox',
+  'menu-button':       'menu-button',
+  'menubar':           'menubar',
+  'meter':             'meter',
+  'radio-group':       'radio',
+  'slider':            'slider',
+  'slider-multithumb': 'slider-multithumb',
+  'spinbutton':        'spinbutton',
+  'switch':            'switch',
+  'table':             'table',
+  'tabs':              'tabs',
+  'toolbar':           'toolbar',
+  'tooltip':           'tooltip',
+  'tree-view':         'treeview',
+  'treegrid':          'treegrid',
+  'window-splitter':   'windowsplitter',
+};
+
+const APG_BASE = 'https://www.w3.org/WAI/ARIA/apg/patterns/';
+
+function resolveApgUrl(slug) {
+  if (!slug) return APG_BASE;
+  const normalized = slug.toLowerCase().trim();
+  // Direct match
+  if (APG_PATTERNS[normalized]) return APG_BASE + APG_PATTERNS[normalized] + '/';
+  // Fuzzy: find a key that contains the slug or vice versa
+  const fuzzy = Object.entries(APG_PATTERNS).find(
+    ([k]) => k.includes(normalized) || normalized.includes(k)
+  );
+  return fuzzy ? APG_BASE + fuzzy[1] + '/' : APG_BASE;
+}
+
 // ── Claude API ──────────────────────────────────────────────────────────────
 
 async function handleClaudeLookup(payload, sendResponse) {
@@ -60,6 +109,8 @@ async function handleClaudeLookup(payload, sendResponse) {
   if (!apiKey) { sendResponse({ error: 'No API key configured' }); return; }
 
   const { componentType, role, tagName, attributes, context } = payload;
+
+  const slugList = Object.keys(APG_PATTERNS).join(', ');
 
   const prompt = `You are an accessibility expert specializing in the ARIA Authoring Practices Guide (APG).
 
@@ -70,10 +121,13 @@ A web component has been detected with the following characteristics:
 - Key attributes: ${JSON.stringify(attributes)}
 - Context: ${context || 'n/a'}
 
+Valid APG pattern slugs (pick the closest match for "patternSlug"):
+${slugList}
+
 Respond with a JSON object (no markdown, no explanation, raw JSON only) with exactly these keys:
 {
-  "patternName": "<APG pattern name, e.g. 'Button', 'Dialog', 'Tabs'>",
-  "patternUrl": "<APG docs URL>",
+  "patternName": "<human-readable APG pattern name, e.g. 'Button', 'Modal Dialog', 'Tabs'>",
+  "patternSlug": "<one slug from the list above — must match exactly>",
   "keyboardInteractions": ["<interaction 1>", "<interaction 2>", ...],
   "requiredRoles": ["<role>", ...],
   "requiredAttributes": ["<aria-* attribute>", ...],
@@ -109,9 +163,12 @@ Respond with a JSON object (no markdown, no explanation, raw JSON only) with exa
     try {
       parsed = JSON.parse(raw);
     } catch {
-      // Try extracting JSON from within the response
       const match = raw.match(/\{[\s\S]*\}/);
       parsed = match ? JSON.parse(match[0]) : { error: 'Could not parse Claude response', raw };
+    }
+    // Always resolve URL from the slug — never trust a freehand URL from Claude
+    if (parsed && !parsed.error) {
+      parsed.patternUrl = resolveApgUrl(parsed.patternSlug);
     }
     sendResponse({ result: parsed });
   } catch (err) {
