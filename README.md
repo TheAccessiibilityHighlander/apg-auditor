@@ -1,6 +1,19 @@
 # APG Auditor
 
-A Chrome extension for professional accessibility auditing using the ARIA Authoring Practices Guide and axe-core.
+A Chrome extension for professional web accessibility auditing. APG Auditor combines automated axe-core scanning with AI-guided [ARIA Authoring Practices Guide](https://www.w3.org/WAI/ARIA/apg/) pattern matching — so you spend less time cross-referencing specs and more time finding real issues.
+
+Most accessibility tools tell you *what* failed. APG Auditor tells you *why it matters for that specific component*, what keyboard behavior is expected, what ARIA attributes are required, and what to manually verify — mapped directly to the APG pattern.
+
+Built for accessibility consultants and auditors who are tired of tabbing between the APG, DevTools, and a spreadsheet.
+
+---
+
+## Requirements
+
+- Google Chrome 116 or later
+- A Claude API key — get one at [console.anthropic.com](https://console.anthropic.com)
+
+---
 
 ## Setup
 
@@ -9,29 +22,37 @@ A Chrome extension for professional accessibility auditing using the ARIA Author
 3. Click the APG Auditor icon in the toolbar — the side panel opens
 4. Go to **Settings** (gear icon) and paste your Claude API key
 
+---
+
 ## Usage
 
 ### Scanning
+
 - Navigate to any page and click **Scan Page**
 - The tool traverses the DOM and runs axe-core to detect components and violations
 - Click any component to expand its details, see axe violations, and look up its APG pattern
 
 ### APG Pattern Lookup
+
 - Inside a component's detail, click **APG Pattern ↗**
-- Claude (claude-sonnet-4-20250514) maps the component to the correct APG pattern and returns:
+- Claude (`claude-sonnet-4-20250514`) maps the component to the correct APG pattern and returns:
   - Required keyboard interactions
   - Required ARIA roles, attributes, and states
   - Top 3 common failures for that pattern
 
 ### Logging Findings
+
 - Click **Log Finding** on any component, or use **Add Finding** in the Findings tab
 - Fill in the element description, WCAG criterion (searchable), level, severity, frequency, and notes
 - Findings persist across sessions via Chrome storage
 
 ### Export
+
 - Go to the **Export** tab
 - Add your name/org in the Auditor field
 - Export as **CSV** (spreadsheet-friendly) or **JSON** (structured data)
+
+---
 
 ## Project Structure
 
@@ -48,6 +69,14 @@ apg-auditor/
 └── README.md
 ```
 
+---
+
 ## API Key Security
 
 The Claude API key is stored in `chrome.storage.local` — it is local to your browser and never leaves your machine except for direct calls to `api.anthropic.com`.
+
+---
+
+## Contributing
+
+Issues and PRs welcome. If you're an accessibility practitioner and something doesn't match real-world audit workflows, open an issue — that feedback is worth more than most bug reports.
