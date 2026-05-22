@@ -61,6 +61,12 @@ async function handleScanPage(tabId, sendResponse) {
 async function handleApgScore(tabId, xpath, sendResponse) {
   if (!tabId || !xpath) { sendResponse({ error: 'Missing tabId or xpath' }); return; }
 
+  // Ensure content script is loaded (page may have reloaded since last scan)
+  await chrome.scripting.executeScript({
+    target: { tabId },
+    files: ['content.js'],
+  }).catch(() => {}); // ignore "already loaded" guard error
+
   let serialized;
   try {
     serialized = await new Promise((resolve, reject) => {

@@ -1,7 +1,8 @@
 // Content script — DOM traversal, scan orchestration, and element fingerprinting
 // axe-core is injected by the background service worker before APG_START_SCAN fires
 
-if (window.__apgAuditorLoaded) throw new Error('APG already loaded');
+(function () {
+if (window.__apgAuditorLoaded) return;
 window.__apgAuditorLoaded = true;
 
 let scanInProgress = false;
@@ -251,9 +252,9 @@ async function startScan() {
       type: 'SCAN_COMPLETE',
       components: mapped,
       axeSummary: {
-        violations: axeResults.violations.length,
-        passes: axeResults.passes.length,
-        incomplete: axeResults.incomplete.length,
+        violations: mapped.filter(c => c.axeViolations?.length > 0).length,
+        incomplete: mapped.filter(c => c.axeIncomplete?.length > 0).length,
+        passes:     mapped.filter(c => !c.axeViolations?.length && !c.axeIncomplete?.length).length,
         inapplicable: axeResults.inapplicable.length,
       },
     });
@@ -558,3 +559,4 @@ function getElementByXPath(xpath) {
 function notifyPanel(data) {
   chrome.runtime.sendMessage({ ...data, source: 'content' });
 }
+})();
