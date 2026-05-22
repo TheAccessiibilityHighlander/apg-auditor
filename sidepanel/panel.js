@@ -83,6 +83,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   await loadFindings();
   updateFindingsBadge();
   updateExportCount();
+  if (state.settings.autoScan) startScan();
 });
 
 // ── Message listener (from content script via service worker) ─────────────────
