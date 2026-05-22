@@ -1,4 +1,4 @@
-// Content script — DOM traversal and scan orchestration
+// Content script — DOM traversal, scan orchestration, and element fingerprinting
 // axe-core is injected by the background service worker before APG_START_SCAN fires
 
 if (window.__apgAuditorLoaded) throw new Error('APG already loaded');
@@ -6,12 +6,218 @@ window.__apgAuditorLoaded = true;
 
 let scanInProgress = false;
 
+// ── Inline fingerprint engine ─────────────────────────────────────────────────
+// Mirrors lib/fingerprinter.js — kept inline because content scripts cannot
+// import ES modules. Any logic change must be mirrored in lib/fingerprinter.js.
+
+const _APG_NATIVE_ROLES = new Map([
+  ['button',   () => 'button'],
+  ['input',    el => ({ checkbox:'checkbox', radio:'radio', range:'slider',
+      number:'spinbutton', button:'button', submit:'button', reset:'button',
+      image:'button', search:'searchbox' }[(el.getAttribute('type')||'text').toLowerCase()] ?? 'textbox')],
+  ['select',   el => el.multiple ? 'listbox' : 'combobox'],
+  ['textarea', () => 'textbox'],
+  ['a',        el => el.hasAttribute('href') ? 'link' : null],
+  ['area',     el => el.hasAttribute('href') ? 'link' : null],
+  ['main',     () => 'main'],     ['nav',     () => 'navigation'],
+  ['aside',    () => 'complementary'], ['search',  () => 'search'],
+  ['form',     el => (el.getAttribute('aria-label')||el.getAttribute('aria-labelledby')) ? 'form' : null],
+  ['section',  el => (el.getAttribute('aria-label')||el.getAttribute('aria-labelledby')) ? 'region' : null],
+  ['article',  () => 'article'],
+  ['header',   el => _apgIsTopLevel(el) ? 'banner' : null],
+  ['footer',   el => _apgIsTopLevel(el) ? 'contentinfo' : null],
+  ['h1','h2','h3','h4','h5','h6'].reduce((m,t) => { m.set(t, ()=>'heading'); return m; }, new Map()),
+  ['ul', () => 'list'], ['ol', () => 'list'], ['li', () => 'listitem'],
+  ['table', () => 'table'], ['tr', () => 'row'], ['td', () => 'cell'],
+  ['th',   el => el.getAttribute('scope')==='row' ? 'rowheader' : 'columnheader'],
+  ['meter', () => 'meter'], ['progress', () => 'progressbar'],
+  ['dialog', () => 'dialog'], ['details', () => 'group'], ['summary', () => 'button'],
+  ['img', el => { const a = el.getAttribute('alt'); return a===null?'img':a===''?'presentation':'img'; }],
+]);
+// Flatten the heading sub-map into the main map
+['h1','h2','h3','h4','h5','h6'].forEach(t => _APG_NATIVE_ROLES.set(t, () => 'heading'));
+
+function _apgIsTopLevel(el) {
+  let p = el.parentElement;
+  while (p) {
+    if (['article','aside','main','nav','section'].includes(p.tagName.toLowerCase())) return false;
+    p = p.parentElement;
+  }
+  return true;
+}
+
+function _apgComputeRole(el) {
+  const explicit = el.getAttribute('role');
+  if (explicit) return explicit.trim().split(/\s+/)[0];
+  const r = _APG_NATIVE_ROLES.get(el.tagName.toLowerCase());
+  return r ? (r(el) || null) : null;
+}
+
+const _APG_FOCUSABLE_TAGS = new Set(['button','input','select','textarea','a','area',
+  'audio','video','details','summary','iframe']);
+
+function _apgInTabOrder(el) {
+  const ti = el.getAttribute('tabindex');
+  if (ti !== null) return parseInt(ti, 10) >= 0;
+  const tag = el.tagName.toLowerCase();
+  if (!_APG_FOCUSABLE_TAGS.has(tag)) return false;
+  if (el.disabled) return false;
+  if ((tag === 'a' || tag === 'area') && !el.hasAttribute('href')) return false;
+  return true;
+}
+
+function _apgPassiveFingerprint(el) {
+  const tag  = el.tagName.toLowerCase();
+  const role = _apgComputeRole(el);
+  const attrs = new Set(), attrValues = new Map();
+  for (const { name, value } of el.attributes) { attrs.add(name); attrValues.set(name, value); }
+
+  const descendantsByRole = new Map();
+  for (const child of el.querySelectorAll('*')) {
+    const r = _apgComputeRole(child);
+    if (r) descendantsByRole.set(r, (descendantsByRole.get(r) ?? 0) + 1);
+  }
+  const peersByRole = new Map();
+  const parent = el.parentElement;
+  if (parent) {
+    for (const sib of parent.children) {
+      if (sib === el) continue;
+      const r = _apgComputeRole(sib);
+      if (r) peersByRole.set(r, (peersByRole.get(r) ?? 0) + 1);
+    }
+  }
+
+  const withTi = el.querySelectorAll('[tabindex]');
+  let rovingTabindex = false;
+  if (withTi.length >= 2) {
+    let hasZero = false, hasNeg = false;
+    for (const d of withTi) {
+      const v = parseInt(d.getAttribute('tabindex'), 10);
+      if (v === 0) hasZero = true; if (v === -1) hasNeg = true;
+      if (hasZero && hasNeg) { rovingTabindex = true; break; }
+    }
+  }
+
+  const cs = window.getComputedStyle(el);
+  return { tag, role, attrs, attrValues, inTabOrder: _apgInTabOrder(el),
+    tabindexValue: el.getAttribute('tabindex') !== null ? parseInt(el.getAttribute('tabindex'),10) : null,
+    descendantsByRole, peersByRole, rovingTabindex, computedStyle: { cursor: cs.cursor } };
+}
+
+const _APG_KEY_MAP = { Enter:'Enter', Space:' ', ArrowRight:'ArrowRight', ArrowLeft:'ArrowLeft',
+  ArrowDown:'ArrowDown', ArrowUp:'ArrowUp', Escape:'Escape', Home:'Home', End:'End',
+  Tab:'Tab', PageDown:'PageDown', PageUp:'PageUp' };
+const _APG_PROBE_ORDER = ['ArrowRight','ArrowLeft','ArrowDown','ArrowUp',
+  'Home','End','PageDown','PageUp','Escape','Tab','Enter','Space'];
+
+function _apgFireKey(el, signalKey) {
+  const key  = _APG_KEY_MAP[signalKey] ?? signalKey;
+  const code = signalKey === 'Space' ? 'Space' : signalKey;
+  const init = { key, code, bubbles: true, cancelable: true };
+  el.dispatchEvent(new KeyboardEvent('keydown', init));
+  el.dispatchEvent(new KeyboardEvent('keyup',   init));
+}
+
+function _apgSnapAttrs(el) {
+  const m = new Map();
+  for (const { name, value } of el.attributes) m.set(name, value);
+  return m;
+}
+
+function _apgDiffAttrs(before, el) {
+  const changes = new Map(), after = _apgSnapAttrs(el);
+  for (const [n, bv] of before) { const av = after.get(n)??null; if(av!==bv) changes.set(n,{before:bv,after:av}); }
+  for (const [n, av] of after)  { if (!before.has(n)) changes.set(n, {before:null,after:av}); }
+  return changes;
+}
+
+function _apgIsHidden(el) {
+  if (!el.isConnected) return true;
+  const cs = window.getComputedStyle(el);
+  return cs.display==='none' || cs.visibility==='hidden' || el.getAttribute('aria-hidden')==='true';
+}
+
+function _apgTick() { return new Promise(r => setTimeout(r, 16)); }
+
+async function _apgActiveFingerprint(el) {
+  if (document.activeElement !== el) { el.focus({ preventScroll: true }); await _apgTick(); }
+  const keyProbes = new Map();
+  let activationMutations = { self: new Map(), parent: new Map() };
+
+  for (const signalKey of _APG_PROBE_ORDER) {
+    const beforeFocus  = document.activeElement;
+    const beforeAttrs  = _apgSnapAttrs(el);
+    const beforeParent = el.parentElement ? _apgSnapAttrs(el.parentElement) : new Map();
+    const wasHidden    = _apgIsHidden(el);
+
+    _apgFireKey(el, signalKey);
+    await _apgTick();
+
+    const afterFocus     = document.activeElement;
+    const attrMutations  = _apgDiffAttrs(beforeAttrs, el);
+    const focusMoved     = afterFocus !== beforeFocus;
+    const closed         = !wasHidden && _apgIsHidden(el);
+    const valueChanged   = attrMutations.has('aria-valuenow') || attrMutations.has('value');
+    const activated      = !focusMoved && !closed && attrMutations.size > 0;
+
+    keyProbes.set(signalKey, { focusMoved, activated, closed, valueChanged, attrMutations });
+
+    if (signalKey === 'Enter') {
+      const parentMutations = el.parentElement ? _apgDiffAttrs(beforeParent, el.parentElement) : new Map();
+      activationMutations = { self: attrMutations, parent: parentMutations };
+    }
+    if (focusMoved && !closed && el.isConnected) { el.focus({ preventScroll: true }); await _apgTick(); }
+    if (closed) break;
+  }
+  return { keyProbes, activationMutations };
+}
+
+function _apgSerializePassive(pf) {
+  return { tag: pf.tag, role: pf.role, attrs: [...pf.attrs],
+    attrValues: [...pf.attrValues.entries()], inTabOrder: pf.inTabOrder,
+    tabindexValue: pf.tabindexValue,
+    descendantsByRole: [...pf.descendantsByRole.entries()],
+    peersByRole: [...pf.peersByRole.entries()],
+    rovingTabindex: pf.rovingTabindex, computedStyle: pf.computedStyle };
+}
+
+function _apgSerializeActive(af) {
+  return {
+    keyProbes: [...af.keyProbes.entries()].map(([k, p]) =>
+      [k, { ...p, attrMutations: [...p.attrMutations.entries()] }]),
+    activationMutations: {
+      self:   [...af.activationMutations.self.entries()],
+      parent: [...af.activationMutations.parent.entries()],
+    },
+  };
+}
+
 // ── Listen for scan trigger from service worker or panel ────────────────────
 
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (msg.type === 'START_SCAN') {
     console.log('[APG] START_SCAN received in content script');
     startScan().then(sendResponse);
+    return true;
+  }
+  if (msg.type === 'FINGERPRINT_ELEMENT') {
+    (async () => {
+      try {
+        const el = getElementByXPath(msg.xpath);
+        if (!el) { sendResponse({ error: 'Element not found for xpath: ' + msg.xpath }); return; }
+        const passive = _apgPassiveFingerprint(el);
+        let active = null;
+        if (_apgInTabOrder(el)) {
+          try { active = await _apgActiveFingerprint(el); } catch { /* passive only */ }
+        }
+        sendResponse({
+          passive: _apgSerializePassive(passive),
+          active:  active ? _apgSerializeActive(active) : null,
+        });
+      } catch (err) {
+        sendResponse({ error: err.message });
+      }
+    })();
     return true;
   }
   if (msg.type === 'PING') {

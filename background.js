@@ -1,4 +1,7 @@
-// Service worker — handles side panel activation, message routing, and Claude API calls
+// Service worker — handles side panel activation, message routing, and APG pattern scoring
+
+import { SIGNATURES } from './lib/signatures/index.js';
+import { scoreAll }   from './lib/scorer.js';
 
 chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });
 
@@ -9,8 +12,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     case 'SCAN_PAGE':
       handleScanPage(msg.tabId, sendResponse);
       return true;
-    case 'CLAUDE_APG_LOOKUP':
-      handleClaudeLookup(msg.payload, sendResponse);
+    case 'APG_SCORE':
+      handleApgScore(msg.tabId, msg.xpath, sendResponse);
       return true;
     case 'GET_SETTINGS':
       handleGetSettings(sendResponse);
@@ -53,87 +56,107 @@ async function handleScanPage(tabId, sendResponse) {
   }
 }
 
-// ── APG pattern slug → validated URL ────────────────────────────────────────
-// All slugs verified against https://www.w3.org/WAI/ARIA/apg/patterns/
+// ── APG Pattern Scoring ──────────────────────────────────────────────────────
 
-const APG_PATTERNS = {
-  'accordion':         'accordion',
-  'alert':             'alert',
-  'alert-dialog':      'alertdialog',
-  'breadcrumb':        'breadcrumb',
-  'button':            'button',
-  'carousel':          'carousel',
-  'checkbox':          'checkbox',
-  'combobox':          'combobox',
-  'dialog':            'dialog-modal',
-  'disclosure':        'disclosure',
-  'feed':              'feed',
-  'grid':              'grid',
-  'link':              'link',
-  'listbox':           'listbox',
-  'menu-button':       'menu-button',
-  'menubar':           'menubar',
-  'meter':             'meter',
-  'radio-group':       'radio',
-  'slider':            'slider',
-  'slider-multithumb': 'slider-multithumb',
-  'spinbutton':        'spinbutton',
-  'switch':            'switch',
-  'table':             'table',
-  'tabs':              'tabs',
-  'toolbar':           'toolbar',
-  'tooltip':           'tooltip',
-  'tree-view':         'treeview',
-  'treegrid':          'treegrid',
-  'window-splitter':   'windowsplitter',
-};
+async function handleApgScore(tabId, xpath, sendResponse) {
+  if (!tabId || !xpath) { sendResponse({ error: 'Missing tabId or xpath' }); return; }
 
-const APG_BASE = 'https://www.w3.org/WAI/ARIA/apg/patterns/';
+  let serialized;
+  try {
+    serialized = await new Promise((resolve, reject) => {
+      chrome.tabs.sendMessage(tabId, { type: 'FINGERPRINT_ELEMENT', xpath }, (res) => {
+        if (chrome.runtime.lastError) reject(new Error(chrome.runtime.lastError.message));
+        else if (res?.error)          reject(new Error(res.error));
+        else                          resolve(res);
+      });
+    });
+  } catch (err) {
+    sendResponse({ error: err.message });
+    return;
+  }
 
-function resolveApgUrl(slug) {
-  if (!slug) return APG_BASE;
-  const normalized = slug.toLowerCase().trim();
-  // Direct match
-  if (APG_PATTERNS[normalized]) return APG_BASE + APG_PATTERNS[normalized] + '/';
-  // Fuzzy: find a key that contains the slug or vice versa
-  const fuzzy = Object.entries(APG_PATTERNS).find(
-    ([k]) => k.includes(normalized) || normalized.includes(k)
-  );
-  return fuzzy ? APG_BASE + fuzzy[1] + '/' : APG_BASE;
+  const fingerprint = deserializeFingerprint(serialized);
+  const allResults  = scoreAll(SIGNATURES, fingerprint);
+  const results     = buildScoreResponse(allResults);
+
+  // Phase 5: AI disambiguation — Haiku tiebreaker when confidence is low or close
+  const { apiKey } = await chrome.storage.local.get('apiKey');
+  const disambiguation = await maybeDisambiguate(results, apiKey);
+
+  sendResponse({ results, disambiguation });
 }
 
-// ── Claude API ──────────────────────────────────────────────────────────────
+function deserializeFingerprint(data) {
+  const passive = {
+    ...data.passive,
+    attrs:             new Set(data.passive.attrs),
+    attrValues:        new Map(data.passive.attrValues),
+    descendantsByRole: new Map(data.passive.descendantsByRole),
+    peersByRole:       new Map(data.passive.peersByRole),
+  };
 
-async function handleClaudeLookup(payload, sendResponse) {
-  const { apiKey } = await chrome.storage.local.get('apiKey');
-  if (!apiKey) { sendResponse({ error: 'No API key configured' }); return; }
+  let active = null;
+  if (data.active) {
+    active = {
+      keyProbes: new Map(
+        data.active.keyProbes.map(([key, probe]) => [
+          key, { ...probe, attrMutations: new Map(probe.attrMutations) },
+        ])
+      ),
+      activationMutations: {
+        self:   new Map(data.active.activationMutations.self),
+        parent: new Map(data.active.activationMutations.parent),
+      },
+    };
+  }
 
-  const { componentType, role, tagName, attributes, context } = payload;
+  return { passive, active };
+}
 
-  const slugList = Object.keys(APG_PATTERNS).join(', ');
+function buildScoreResponse(allResults) {
+  return allResults.slice(0, 3).map(result => {
+    const sig = SIGNATURES.get(result.patternName);
+    return {
+      ...result,
+      keyboardInteractions: sig?.keyboardInteractions ?? [],
+      requiredRoles:        sig?.requiredRoles        ?? [],
+      requiredAttributes:   sig?.requiredAttributes   ?? [],
+      requiredStates:       sig?.requiredStates        ?? [],
+      commonFailures:       sig?.commonFailures        ?? [],
+    };
+  });
+}
 
-  const prompt = `You are an accessibility expert specializing in the ARIA Authoring Practices Guide (APG).
+// ── AI Disambiguation (Phase 5) ──────────────────────────────────────────────
 
-A web component has been detected with the following characteristics:
-- Tag: ${tagName}
-- Detected type: ${componentType}
-- ARIA role: ${role || 'none'}
-- Key attributes: ${JSON.stringify(attributes)}
-- Context: ${context || 'n/a'}
+/**
+ * Call Claude Haiku to pick the best match when the scorer is not confident.
+ * Trigger conditions:
+ *   - top confidence < 0.60  (weak scorer result)
+ *   - OR gap between top-1 and top-2 < 0.15 and both >= 0.30  (genuine tie)
+ * Skipped when top confidence >= 0.85 (strong match — AI adds nothing).
+ * Silent fail: returns null if the API call fails.
+ *
+ * @param {object[]} results — top 3 ScoreResults from buildScoreResponse
+ * @param {string}   apiKey
+ * @returns {Promise<{selectedPattern:string, reason:string}|null>}
+ */
+async function maybeDisambiguate(results, apiKey) {
+  if (!apiKey || !results.length) return null;
 
-Valid APG pattern slugs (pick the closest match for "patternSlug"):
-${slugList}
+  const top       = results[0];
+  const runnerUp  = results[1];
 
-Respond with a JSON object (no markdown, no explanation, raw JSON only) with exactly these keys:
-{
-  "patternName": "<human-readable APG pattern name, e.g. 'Button', 'Modal Dialog', 'Tabs'>",
-  "patternSlug": "<one slug from the list above — must match exactly>",
-  "keyboardInteractions": ["<interaction 1>", "<interaction 2>", ...],
-  "requiredRoles": ["<role>", ...],
-  "requiredAttributes": ["<aria-* attribute>", ...],
-  "requiredStates": ["<aria-* state>", ...],
-  "commonFailures": ["<failure 1>", "<failure 2>", "<failure 3>"]
-}`;
+  if (top.confidence >= 0.85) return null;
+
+  const lowConfidence = top.confidence < 0.60;
+  const tooClose      = runnerUp
+    && runnerUp.confidence >= 0.30
+    && (top.confidence - runnerUp.confidence) < 0.15;
+
+  if (!lowConfidence && !tooClose) return null;
+
+  const prompt = buildDisambiguationPrompt(results);
 
   try {
     const res = await fetch('https://api.anthropic.com/v1/messages', {
@@ -145,35 +168,48 @@ Respond with a JSON object (no markdown, no explanation, raw JSON only) with exa
         'anthropic-dangerous-direct-browser-access': 'true',
       },
       body: JSON.stringify({
-        model: 'claude-sonnet-4-6',
-        max_tokens: 1024,
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: 200,
         messages: [{ role: 'user', content: prompt }],
       }),
     });
 
-    if (!res.ok) {
-      const errText = await res.text();
-      sendResponse({ error: `API error ${res.status}: ${errText}` });
-      return;
-    }
+    if (!res.ok) return null;
 
     const data = await res.json();
-    const raw = data.content?.[0]?.text ?? '';
+    const raw  = data.content?.[0]?.text ?? '';
     let parsed;
     try {
       parsed = JSON.parse(raw);
     } catch {
-      const match = raw.match(/\{[\s\S]*\}/);
-      parsed = match ? JSON.parse(match[0]) : { error: 'Could not parse Claude response', raw };
+      const m = raw.match(/\{[\s\S]*?\}/);
+      parsed  = m ? JSON.parse(m[0]) : null;
     }
-    // Always resolve URL from the slug — never trust a freehand URL from Claude
-    if (parsed && !parsed.error) {
-      parsed.patternUrl = resolveApgUrl(parsed.patternSlug);
-    }
-    sendResponse({ result: parsed });
-  } catch (err) {
-    sendResponse({ error: err.message });
+    return parsed?.selectedPattern ? { selectedPattern: parsed.selectedPattern, reason: parsed.reason ?? '' } : null;
+  } catch {
+    return null; // silent fail — scorer result is still shown
   }
+}
+
+function buildDisambiguationPrompt(results) {
+  const candidates = results.map((r, i) => {
+    const passed  = r.signals.filter(s =>  s.passed && !s.skipped).map(s => s.id).join(', ') || 'none';
+    const failed  = r.signals.filter(s => !s.passed && !s.skipped && s.required).map(s => s.id).join(', ') || 'none';
+    const skipped = r.signals.filter(s =>  s.skipped && s.required).map(s => s.id).join(', ') || 'none';
+    return `${i + 1}. ${r.patternName} — ${Math.round(r.confidence * 100)}% scorer confidence
+   Passed signals:      ${passed}
+   Required failures:   ${failed}
+   Unchecked required:  ${skipped}`;
+  }).join('\n\n');
+
+  return `You are an accessibility expert reviewing ARIA behavioral pattern analysis.
+
+The scorer identified these APG pattern candidates based on DOM inspection and keyboard probing:
+
+${candidates}
+
+Pick the single most likely APG pattern. Respond with JSON only (no markdown, no explanation outside the JSON):
+{"selectedPattern": "<exact name from list above>", "reason": "<one concise sentence explaining why>"}`;
 }
 
 // ── Settings ────────────────────────────────────────────────────────────────

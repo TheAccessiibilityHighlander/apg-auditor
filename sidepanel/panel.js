@@ -454,62 +454,136 @@ function toggleComponent(item, header) {
 
 async function openApgOverlay(comp, triggerEl) {
   const overlay = document.getElementById('apgOverlay');
-  const body = document.getElementById('apgBody');
+  const body    = document.getElementById('apgBody');
 
-  body.innerHTML = '<div class="spinner" aria-label="Loading APG data…"></div>';
+  body.innerHTML = '<div class="spinner" aria-label="Analyzing pattern…"></div>';
   openDialog(overlay, triggerEl);
+  document.getElementById('closeApgBtn').onclick = () => closeDialog(overlay);
 
-  if (!state.settings.apiKey) {
-    body.innerHTML = `<div style="color:var(--yellow);font-size:13px">⚠ No API key configured. Open Settings to add your Claude API key.</div>`;
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (!tab?.id) {
+    body.innerHTML = `<div style="color:var(--red);font-size:13px">No active tab found.</div>`;
     return;
   }
 
-  chrome.runtime.sendMessage({
-    type: 'CLAUDE_APG_LOOKUP',
-    payload: {
-      componentType: comp.componentType,
-      role: comp.role,
-      tagName: comp.tagName,
-      attributes: comp.ariaAttrs,
-      context: comp.accessibleName,
-    },
-  }, (res) => {
-    if (res?.error) {
-      body.innerHTML = `<div style="color:var(--red);font-size:13px">Error: ${esc(res.error)}</div>`;
-      return;
+  chrome.runtime.sendMessage(
+    { type: 'APG_SCORE', tabId: tab.id, xpath: comp.xpath },
+    (res) => {
+      if (chrome.runtime.lastError || res?.error) {
+        body.innerHTML = `<div style="color:var(--red);font-size:13px">Error: ${esc(res?.error || chrome.runtime.lastError?.message)}</div>`;
+        return;
+      }
+      body.innerHTML = buildApgHTML(res.results, res.disambiguation ?? null);
+      const idx = state.components.findIndex(c => c.id === comp.id);
+      if (idx !== -1) state.components[idx].apgData = { results: res.results, disambiguation: res.disambiguation };
     }
-    body.innerHTML = buildApgHTML(res.result);
-
-    // Cache result on the component
-    const idx = state.components.findIndex(c => c.id === comp.id);
-    if (idx !== -1) state.components[idx].apgData = res.result;
-  });
-
-  document.getElementById('closeApgBtn').onclick = () => closeDialog(overlay);
+  );
 }
 
-function buildApgHTML(data) {
-  if (!data || data.error) {
-    return `<div style="color:var(--red)">Could not retrieve APG data: ${esc(data?.raw || data?.error || 'Unknown error')}</div>`;
+function buildApgHTML(results, disambiguation = null) {
+  if (!Array.isArray(results) || results.length === 0) {
+    return `<div style="color:var(--text2);font-size:13px">No pattern match found for this element.</div>`;
   }
 
-  const kb = (data.keyboardInteractions || []).map(k => `<li>${esc(k)}</li>`).join('');
-  const roles = (data.requiredRoles || []).map(r => `<span class="apg-chip">${esc(r)}</span>`).join('');
-  const attrs = (data.requiredAttributes || []).map(a => `<span class="apg-chip">${esc(a)}</span>`).join('');
-  const states = (data.requiredStates || []).map(s => `<span class="apg-chip">${esc(s)}</span>`).join('');
-  const failures = (data.commonFailures || []).map((f, i) => `
+  // If AI picked a different pattern than scorer top, surface it as primary display
+  let top = results[0];
+  let aiOverride = false;
+  if (disambiguation?.selectedPattern && disambiguation.selectedPattern !== top.patternName) {
+    const aiPick = results.find(r => r.patternName === disambiguation.selectedPattern);
+    if (aiPick) { top = aiPick; aiOverride = true; }
+  }
+
+  // Confidence display
+  const pct   = Math.round(top.confidence * 100);
+  const color = top.confidence >= 0.75 ? 'var(--green)'
+              : top.confidence >= 0.50 ? 'var(--yellow)'
+              : 'var(--orange)';
+  const label = top.confidence >= 0.75 ? 'Strong match'
+              : top.confidence >= 0.50 ? 'Likely match'
+              : 'Possible match';
+
+  const confidenceMeter = `
+    <div style="display:flex;align-items:center;gap:8px;margin:0 12px 4px">
+      <div style="flex:1;height:4px;background:var(--bg4);border-radius:2px;overflow:hidden">
+        <div style="width:${pct}%;height:100%;background:${color};border-radius:2px"></div>
+      </div>
+      <span style="font-size:11px;color:${color};white-space:nowrap;min-width:90px;text-align:right">
+        ${pct}% — ${label}
+      </span>
+    </div>`;
+
+  // AI disambiguation banner
+  const aiBanner = disambiguation
+    ? aiOverride
+      ? `<div style="margin:6px 12px;padding:6px 8px;background:var(--purple-bg);border-radius:var(--radius);font-size:12px;color:var(--purple)">
+          ✦ AI suggested: <strong>${esc(disambiguation.selectedPattern)}</strong>
+          ${disambiguation.reason ? `<div style="margin-top:3px;color:var(--text2)">${esc(disambiguation.reason)}</div>` : ''}
+          <div style="margin-top:3px;color:var(--text3)">Scorer top pick: ${esc(results[0].patternName)} (${Math.round(results[0].confidence*100)}%)</div>
+         </div>`
+      : `<div style="margin:6px 12px;padding:5px 8px;border-radius:var(--radius);font-size:11px;color:var(--text3)">
+          ✦ AI confirmed · ${disambiguation.reason ? esc(disambiguation.reason) : ''}
+         </div>`
+    : '';
+
+  // Required signal failures
+  const hardFailWarning = top.hardFailed && top.requiredFailed.length
+    ? `<div style="margin:6px 12px;padding:6px 8px;background:var(--red-bg);border-radius:var(--radius);font-size:12px;color:var(--red)">
+        ⚠ Required signal${top.requiredFailed.length > 1 ? 's' : ''} failed:
+        ${top.requiredFailed.map(id => `<code style="font-family:var(--font-mono)">${esc(id)}</code>`).join(', ')}
+       </div>`
+    : '';
+
+  // Alternate matches (runner-up if within 30 points or > 0.4 confidence)
+  const alts = results.slice(1).filter(r => r.confidence >= 0.4 || r.confidence >= top.confidence - 0.3);
+  const altsHTML = alts.length
+    ? `<div style="margin:4px 12px 8px;font-size:11px;color:var(--text3)">
+        Also matches:
+        ${alts.map(r => `<span style="color:var(--text2)">${esc(r.patternName)}</span>
+          <span style="color:var(--text3)">(${Math.round(r.confidence*100)}%)</span>`).join(' · ')}
+       </div>`
+    : '';
+
+  // Signal analysis (collapsible via details/summary)
+  const signalRows = top.signals.map(s => {
+    const icon  = s.skipped ? '—' : s.passed ? '✓' : '✗';
+    const color = s.skipped ? 'var(--text3)' : s.passed ? 'var(--green)' : s.required ? 'var(--red)' : 'var(--text3)';
+    return `<div style="display:flex;gap:6px;padding:2px 0;font-size:11px">
+      <span style="color:${color};width:12px;flex-shrink:0;font-weight:bold">${icon}</span>
+      <span style="color:var(--text2);flex:1">${esc(s.description)}</span>
+      <span style="color:var(--text3);font-family:var(--font-mono);white-space:nowrap">w:${s.weight}</span>
+    </div>`;
+  }).join('');
+
+  const signalDetails = `
+    <details style="margin:0 12px 8px">
+      <summary style="cursor:pointer;font-size:12px;color:var(--text2);padding:4px 0;user-select:none">
+        Signal analysis (${top.signals.filter(s=>s.passed).length}/${top.signals.filter(s=>!s.skipped).length} passed)
+      </summary>
+      <div style="padding:6px 0 0">${signalRows}</div>
+    </details>`;
+
+  // Keyboard interactions, required ARIA, common failures (from signature)
+  const kb = (top.keyboardInteractions || []).map(k => `<li>${esc(k)}</li>`).join('');
+  const roles  = (top.requiredRoles      || []).map(r => `<span class="apg-chip">${esc(r)}</span>`).join('');
+  const attrs  = (top.requiredAttributes || []).map(a => `<span class="apg-chip">${esc(a)}</span>`).join('');
+  const states = (top.requiredStates     || []).map(s => `<span class="apg-chip">${esc(s)}</span>`).join('');
+  const failures = (top.commonFailures   || []).map((f, i) => `
     <div class="failure-item">
       <span class="failure-num">${i + 1}</span>
       <span>${esc(f)}</span>
     </div>`).join('');
 
   return `
-    <div class="apg-pattern-name">${esc(data.patternName || 'Unknown Pattern')}</div>
+    <div class="apg-pattern-name">${esc(top.patternName || 'Unknown Pattern')}</div>
     <div class="apg-pattern-url">
-      <a href="${esc(data.patternUrl || 'https://www.w3.org/WAI/ARIA/apg/')}" target="_blank" rel="noopener">
+      <a href="${esc(top.patternUrl || 'https://www.w3.org/WAI/ARIA/apg/')}" target="_blank" rel="noopener">
         View in APG ↗
       </a>
     </div>
+    ${confidenceMeter}
+    ${aiBanner}
+    ${hardFailWarning}
+    ${altsHTML}
 
     ${kb ? `
     <div class="apg-section">
@@ -520,8 +594,8 @@ function buildApgHTML(data) {
     ${(roles || attrs || states) ? `
     <div class="apg-section">
       <div class="apg-section-header">Required ARIA</div>
-      ${roles ? `<div style="padding:6px 12px 0;font-size:11px;color:var(--text3)">Roles</div><div class="apg-chips">${roles}</div>` : ''}
-      ${attrs ? `<div style="padding:6px 12px 0;font-size:11px;color:var(--text3)">Attributes</div><div class="apg-chips">${attrs}</div>` : ''}
+      ${roles  ? `<div style="padding:6px 12px 0;font-size:11px;color:var(--text3)">Roles</div><div class="apg-chips">${roles}</div>` : ''}
+      ${attrs  ? `<div style="padding:6px 12px 0;font-size:11px;color:var(--text3)">Attributes</div><div class="apg-chips">${attrs}</div>` : ''}
       ${states ? `<div style="padding:6px 12px 0;font-size:11px;color:var(--text3)">States</div><div class="apg-chips">${states}</div>` : ''}
     </div>` : ''}
 
@@ -530,6 +604,8 @@ function buildApgHTML(data) {
       <div class="apg-section-header">Common Failures</div>
       ${failures}
     </div>` : ''}
+
+    ${signalDetails}
   `;
 }
 
