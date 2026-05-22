@@ -2,7 +2,9 @@
 // axe-core is injected by the background service worker before APG_START_SCAN fires
 
 (function () {
-if (window.__apgAuditorLoaded) return;
+if (window.__apgAuditorLoaded) {
+  try { if (chrome.runtime.id) return; } catch { /* extension was reloaded — re-init */ }
+}
 window.__apgAuditorLoaded = true;
 
 let scanInProgress = false;

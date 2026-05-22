@@ -62,10 +62,11 @@ async function handleApgScore(tabId, xpath, sendResponse) {
   if (!tabId || !xpath) { sendResponse({ error: 'Missing tabId or xpath' }); return; }
 
   // Ensure content script is loaded (page may have reloaded since last scan)
-  await chrome.scripting.executeScript({
-    target: { tabId },
-    files: ['content.js'],
-  }).catch(() => {}); // ignore "already loaded" guard error
+  try {
+    await chrome.scripting.executeScript({ target: { tabId }, files: ['content.js'] });
+  } catch {
+    // Injection failed — tab may be restricted or navigating; try sending anyway
+  }
 
   let serialized;
   try {
@@ -77,7 +78,7 @@ async function handleApgScore(tabId, xpath, sendResponse) {
       });
     });
   } catch (err) {
-    sendResponse({ error: err.message });
+    sendResponse({ error: 'Could not reach page script. Try refreshing the page and scanning again.' });
     return;
   }
 
