@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Privacy Policy — APG Auditor</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      font-size: 16px;
+      line-height: 1.7;
+      color: #1a1a2e;
+      background: #f8f9fa;
+      padding: 2rem 1rem;
+    }
+
+    .page {
+      max-width: 720px;
+      margin: 0 auto;
+      background: #fff;
+      border-radius: 12px;
+      padding: 3rem 3.5rem;
+      box-shadow: 0 2px 12px rgba(0,0,0,.08);
+    }
+
+    .logo {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 2.5rem;
+      color: #5c6bc0;
+      font-weight: 600;
+      font-size: 1.1rem;
+      text-decoration: none;
+    }
+
+    .logo svg { flex-shrink: 0; }
+
+    h1 {
+      font-size: 2rem;
+      font-weight: 700;
+      color: #111;
+      margin-bottom: .5rem;
+    }
+
+    .effective {
+      color: #666;
+      font-size: .9rem;
+      margin-bottom: 2.5rem;
+    }
+
+    h2 {
+      font-size: 1.15rem;
+      font-weight: 600;
+      color: #111;
+      margin: 2rem 0 .6rem;
+    }
+
+    p { margin-bottom: 1rem; color: #333; }
+
+    ul {
+      padding-left: 1.4rem;
+      margin-bottom: 1rem;
+      color: #333;
+    }
+
+    li { margin-bottom: .4rem; }
+
+    a { color: #5c6bc0; }
+    a:hover { text-decoration: underline; }
+
+    .callout {
+      background: #f0f4ff;
+      border-left: 3px solid #5c6bc0;
+      border-radius: 0 8px 8px 0;
+      padding: .9rem 1.2rem;
+      margin: 1.2rem 0;
+      color: #333;
+    }
+
+    footer {
+      margin-top: 3rem;
+      padding-top: 1.5rem;
+      border-top: 1px solid #eee;
+      font-size: .85rem;
+      color: #888;
+    }
+
+    @media (max-width: 600px) {
+      .page { padding: 2rem 1.5rem; }
+      h1 { font-size: 1.6rem; }
+    }
+  </style>
+</head>
+<body>
+<div class="page">
+
+  <a class="logo" href="https://github.com/TheAccessiibilityHighlander/apg-auditor">
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+      <circle cx="12" cy="12" r="10"/>
+      <path d="M12 8v4M12 16h.01"/>
+    </svg>
+    APG Auditor
+  </a>
+
+  <h1>Privacy Policy</h1>
+  <p class="effective">Effective date: May 22, 2026</p>
+
+  <div class="callout">
+    <strong>Short version:</strong> APG Auditor stores everything locally on your device.
+    No personal data is collected, transmitted, or sold. The only optional network
+    request is a call to the Anthropic API using <em>your own</em> API key, which you
+    control entirely.
+  </div>
+
+  <h2>1. What data APG Auditor accesses</h2>
+  <p>
+    To perform an accessibility audit, the extension reads the DOM of the active
+    browser tab you are currently viewing. This includes HTML structure, ARIA
+    attributes, and computed styles. This data is processed entirely within your
+    browser and is never transmitted to any server operated by this extension.
+  </p>
+
+  <h2>2. What data is stored</h2>
+  <p>The following data is saved to <code>chrome.storage.local</code> on your device only:</p>
+  <ul>
+    <li><strong>Claude API key</strong> — if you choose to enter one in Settings. It is stored only in your browser's local extension storage and is never transmitted except directly to the Anthropic API (see section 4).</li>
+    <li><strong>Audit findings</strong> — accessibility findings you log manually during a session.</li>
+    <li><strong>Preferences</strong> — settings such as the auto-scan toggle.</li>
+  </ul>
+  <p>
+    None of this data leaves your device except as described in section 4.
+    Removing the extension permanently deletes all stored data.
+  </p>
+
+  <h2>3. What data is NOT collected</h2>
+  <ul>
+    <li>No analytics or usage telemetry of any kind</li>
+    <li>No crash reports or error logging to external services</li>
+    <li>No browsing history</li>
+    <li>No personally identifiable information</li>
+    <li>No data is ever sold or shared with third parties</li>
+  </ul>
+
+  <h2>4. Optional Anthropic API usage</h2>
+  <p>
+    APG Auditor includes an optional AI disambiguation feature that helps identify
+    ARIA design patterns when the deterministic scorer produces a low-confidence
+    or ambiguous result. This feature is only active if you supply a Claude API key
+    in Settings.
+  </p>
+  <p>When this feature runs, the extension sends the following to the Anthropic API:</p>
+  <ul>
+    <li>A list of candidate ARIA pattern names and their scorer signal results</li>
+    <li>No page content, no URLs, no personally identifiable information</li>
+  </ul>
+  <p>
+    This request is made directly from your browser to
+    <a href="https://api.anthropic.com" target="_blank" rel="noopener">api.anthropic.com</a>
+    using your own API key. Anthropic's handling of API request data is governed by
+    <a href="https://www.anthropic.com/privacy" target="_blank" rel="noopener">Anthropic's Privacy Policy</a>.
+    You can disable this feature at any time by removing your API key from Settings.
+  </p>
+
+  <h2>5. Permissions explained</h2>
+  <ul>
+    <li><strong>Access to all websites</strong> — required so the extension can scan any page you choose to audit. The extension only reads the active tab you explicitly scan; it does not run in the background on other tabs.</li>
+    <li><strong>Storage</strong> — used to save your settings and findings locally on your device.</li>
+    <li><strong>Active tab</strong> — used to identify and communicate with the tab you are currently auditing.</li>
+    <li><strong>Scripting</strong> — used to inject the accessibility scanner and axe-core into the active tab when you initiate a scan.</li>
+    <li><strong>Side panel</strong> — used to display the auditor interface in Chrome's side panel.</li>
+  </ul>
+
+  <h2>6. Children's privacy</h2>
+  <p>
+    APG Auditor is a developer and accessibility professional tool. It is not directed
+    at children and does not knowingly collect any information from anyone under 13.
+  </p>
+
+  <h2>7. Changes to this policy</h2>
+  <p>
+    If this policy changes materially, the effective date above will be updated and
+    a note will be added to the
+    <a href="https://github.com/TheAccessiibilityHighlander/apg-auditor/releases" target="_blank" rel="noopener">release notes</a>.
+    Continued use of the extension after a change constitutes acceptance of the
+    updated policy.
+  </p>
+
+  <h2>8. Contact</h2>
+  <p>
+    Questions or concerns about this policy can be raised by opening an issue on the
+    <a href="https://github.com/TheAccessiibilityHighlander/apg-auditor/issues" target="_blank" rel="noopener">GitHub repository</a>.
+  </p>
+
+  <footer>
+    APG Auditor &mdash; open source accessibility auditing for Chrome &mdash;
+    <a href="https://github.com/TheAccessiibilityHighlander/apg-auditor">github.com/TheAccessiibilityHighlander/apg-auditor</a>
+  </footer>
+
+</div>
+</body>
+</html>
